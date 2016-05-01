@@ -5,7 +5,7 @@
 #include "lib/UnixSocket/UnixSocket.h"
 #include "lib/Connection/Connection.h"
 
-#define DEFAULT_PORT 8082
+#define DEFAULT_PORT 8081
 
 using namespace std;
 

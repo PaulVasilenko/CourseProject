@@ -71,19 +71,21 @@ Response::Response(RequestParser p)
         getcwd(dir, 255);
         int result = stat(target.c_str(), &buf);
         if (result == -1) {
-            switch (errno) {
-                case ENOENT:
-                    cerr << "No such file" << std::endl;
-                    break;
-                default:
-                    cerr << printf("Unknown errno: %d", errno) << std::endl;
-            }
+            cerr << strerror(errno) << std::endl;
             mode = ERROR_FILE_NOT_EXIST;
         } else if (result != 0) {
             mode = INTERNAL_ERROR;
         } else if (S_ISDIR(buf.st_mode)) {
             mode = DIR_LIST;
             path = parser.GetTarget();
+        } else if (parser.IsRangeRequest() && !parser.IsLive()) {
+            mode = GET_FILE_RANGE;
+            path = parser.GetTarget();
+            parser.GetRange(rangeStart, rangeEnd);
+            if (rangeEnd == -1) {
+                rangeEnd = buf.st_size;
+            }
+            fileLength = buf.st_size;
         } else {
             mode = GET_ENTIRE_FILE;
             path = parser.GetTarget();
@@ -101,7 +103,17 @@ bool Response::SendHeaders(UnixSocket* aSocket) {
     headers.append(GetDate());
     headers.append("\r\n");
     headers.append("Server: HttpMediaServer/0.1\r\n");
-
+    headers.append("Accept-Ranges: bytes\r\n");
+    headers.append("Content-Length: ");
+    headers.append(ToString(rangeEnd - rangeStart));
+    headers.append("\r\n");
+    headers.append("Content-Range: bytes ");
+    headers.append(ToString(rangeStart));
+    headers.append("-");
+    headers.append(ToString(rangeStart));
+    headers.append("/");
+    headers.append(ToString(fileLength));
+    headers.append("\r\n");
     headers.append("Content-Type: ");
     if (parser.HasSpecifiedMimeType()) {
         headers.append(parser.GetSpecifiedMimeType());
@@ -125,19 +137,6 @@ bool Response::SendBody(UnixSocket *aSocket) {
     int len = 1024;
     unsigned wait = 0;
     string rateStr;
-    if (ContainsKey(parser.GetParams(), "rate")) {
-        const map<string,string> params = parser.GetParams();
-        rateStr = params.find("rate")->second;
-        double rate = atof(rateStr.c_str());
-        const double period = 0.1;
-        if (rate <= 0.0) {
-            len = 1024;
-            wait = 0;
-        } else {
-            len = (unsigned)(rate * 1024 * period);
-            wait = (unsigned)(period * 1000.0); // ms
-        }
-    }
 
     if (mode == GET_ENTIRE_FILE) {
         if (!file) {
@@ -171,6 +170,44 @@ bool Response::SendBody(UnixSocket *aSocket) {
         // Else we transmitted that segment, we're ok.
         return true;
 
+    } else if (mode == GET_FILE_RANGE) {
+        if (!file) {
+            if (fopen_s(&file, path.c_str(), "rb")) {
+                file = 0;
+                return false;
+            }
+            fseek64(file, rangeStart, SEEK_SET);
+            offset = rangeStart;
+            bytesRemaining = rangeEnd - rangeStart;
+        }
+        if (feof(file) || bytesRemaining == 0) {
+            // Transmitted entire range.
+            fclose(file);
+            file = 0;
+            return false;
+        }
+
+        // Transmit the next segment.
+        char* buf = new char[len];
+
+        len = (unsigned)MIN(bytesRemaining, len);
+        size_t bytesSent = fread(buf, 1, len, file);
+        bytesRemaining -= bytesSent;
+        int r = aSocket->Send(buf, (int)bytesSent);
+        delete buf;
+        if (r < 0) {
+            // Some kind of error.
+            return false;
+        }
+        offset += bytesSent;
+        assert(ftell64(file) == offset);
+
+        if (wait > 0) {
+            Sleep(wait);
+        }
+
+        // Else we tranmitted that segment, we're ok.
+        return true;
     } else if (mode == DIR_LIST) {
         std::stringstream response;
         PathEnumerator *enumerator = PathEnumerator::getEnumerator(path);
@@ -203,6 +240,7 @@ string Response::StatusCode(eMode mode) {
     switch (mode) {
         case GET_ENTIRE_FILE: return string("200 OK");
         case DIR_LIST: return string("200 OK");
+        case GET_FILE_RANGE: return string("206 OK");
         case ERROR_FILE_NOT_EXIST: return string("404 File Not Found");
         case INTERNAL_ERROR:
         default:
