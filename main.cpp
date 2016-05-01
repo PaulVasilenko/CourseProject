@@ -1,9 +1,11 @@
 #include <iostream>
 #include <bits/unique_ptr.h>
+#include <zconf.h>
+#include <signal.h>
 #include "lib/UnixSocket/UnixSocket.h"
 #include "lib/Connection/Connection.h"
 
-#define DEFAULT_PORT 8081
+#define DEFAULT_PORT 8082
 
 using namespace std;
 
@@ -11,7 +13,8 @@ bool gRunning = true;
 
 int main(int argc, char* argv[]) {
     UnixSocket::Init();
-
+    chdir("/var/www/CourseProject");
+    signal(SIGPIPE, SIG_IGN);
     std::unique_ptr<UnixSocket> listener(UnixSocket::Open(DEFAULT_PORT));
 
     if (!listener.get()) {
@@ -33,6 +36,15 @@ int main(int argc, char* argv[]) {
         Connection *c = new Connection(client);
         c->Start();
         Connections.push_back(c);
+
+        for (unsigned i = 0; i<Connections.size(); i++)
+        {
+            if (Connections.at(i)->closed)
+            {
+                delete Connections.at(i);
+                Connections.erase(Connections.begin() + i);
+            }
+        }
     }
 
     UnixSocket::Shutdown();

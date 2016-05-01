@@ -19,6 +19,8 @@ public:
 
     virtual void Run();
 
+    bool closed;
+
 private:
     std::unique_ptr<UnixSocket> mClientSocket;
     RequestParser parser;

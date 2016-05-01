@@ -1,8 +1,5 @@
-//
-// Created by user on 19.4.16.
-//
-
 #include "Connection.h"
+#include "../Response/Response.h"
 
 #define DEFAULT_BUFLEN 512
 
@@ -15,17 +12,18 @@ Connection::Connection(UnixSocket *s)
 {
     mThread = Thread::Create(this);
     mThread->Join();
+    closed = false;
 }
 
 void Connection::Run() {
-    char recvbuf[DEFAULT_BUFLEN];
-    int recvbuflen = DEFAULT_BUFLEN;
+    char receiveBuffer[DEFAULT_BUFLEN];
+    int receiveBufferLength = DEFAULT_BUFLEN;
 
     // Receive until the peer shuts down the connection
     while (!parser.IsComplete()) {
-        int r = mClientSocket->Receive(recvbuf, recvbuflen);
+        int r = mClientSocket->Receive(receiveBuffer, receiveBufferLength);
         if (r > 0) {
-            parser.Add(recvbuf, r);
+            parser.Add(receiveBuffer, (unsigned int) r);
         } else if (r == 0) {
             cout << "Connection closing..." << std::endl;
             break;
@@ -35,18 +33,23 @@ void Connection::Run() {
         }
     }
 
-//    Response response(parser);
-//
-//    if (!response.SendHeaders(mClientSocket.get())) {
-//        mClientSocket->Close();
-//        return;
-//    }
-//
-//    while (response.SendBody(mClientSocket.get())) {
-//        // Transmit the body.
-//    }
+    Response response(parser);
+
+    if (!response.SendHeaders(mClientSocket.get())) {
+        mClientSocket->Close();
+        return;
+    }
+
+    while (response.SendBody(mClientSocket.get())) {
+        // Transmit the body.
+    }
 
     // cleanup
     mClientSocket->Close();
+
+    delete mThread;
+
+    closed = true;
+
     return;
 }
