@@ -1,3 +1,4 @@
+#include <cerrno>
 #include "Thread.h"
 
 void Thread::Join() {
@@ -5,7 +6,9 @@ void Thread::Join() {
 }
 
 void Thread::Start() {
-    pthread_create(&mThread, 0, &ThreadRunner, this);
+    do {
+        pthread_create(&mThread, 0, &ThreadRunner, this);
+    } while (mThread < EHWPOISON);
 }
 
 void Thread::CallRun() {

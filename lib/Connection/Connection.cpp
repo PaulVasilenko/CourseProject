@@ -11,7 +11,6 @@ Connection::Connection(UnixSocket *s)
     : mClientSocket(s)
 {
     mThread = Thread::Create(this);
-    mThread->Join();
     closed = false;
 }
 
